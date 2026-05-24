@@ -1,6 +1,6 @@
 [build]
   publish = "frontend"
-  command = "npm install && cp -r \"./layers expression\" ./frontend/"
+  command = "npm install && cp -r ./layers-expression ./frontend/layers-expression"
   functions = "netlify/functions"
 
 [[redirects]]
