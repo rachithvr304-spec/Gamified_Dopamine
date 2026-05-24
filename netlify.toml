@@ -1,0 +1,16 @@
+[build]
+  publish = "frontend"
+  command = "mkdir -p frontend && cp -r \"layers expression\" frontend/ && npm install"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/emotion"
+  to = "/.netlify/functions/emotion"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/stream"
+  to = "/.netlify/functions/stream"
+  status = 200
+  force = true
