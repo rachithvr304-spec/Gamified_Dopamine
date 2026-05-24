@@ -1629,6 +1629,16 @@ async function handleDistractionSubmit(e) {
     };
     
     AppState.userDistractions.push(entry);
+    
+    // PERSIST LOCALLY: Add to localStorage using the utility function
+    if (typeof addLocalDistraction === 'function') {
+        addLocalDistraction({
+            activity: entry.type,
+            timestamp: entry.timestamp,
+            duration: entry.duration
+        });
+    }
+    
     updateDistractionCounts();
     DOM.distractionForm.reset();
     
@@ -1678,6 +1688,28 @@ function initializeApp() {
     console.log('✅ Animation assets loaded from ./layers-expression/');
     console.log('✅ Backend API ready at:', window.AOI_API_BASE_URL || 'http://localhost:3000');
     
+    // LOAD LOCAL PERSISTENT DATA: Load distractions if they exist in localStorage
+    if (typeof getLocalDistractions === 'function') {
+        const localDistractions = getLocalDistractions();
+        if (localDistractions && localDistractions.length > 0) {
+            AppState.userDistractions = localDistractions;
+            console.log(`📦 Loaded ${localDistractions.length} distractions from localStorage`);
+        }
+    }
+    
+    // LOAD LOCAL CALENDAR EVENTS: Sync local calendar events with calendar view
+    if (typeof getLocalCalendarEvents === 'function') {
+        const localEvents = getLocalCalendarEvents();
+        if (localEvents && localEvents.length > 0) {
+            localEvents.forEach(evt => {
+                if (evt.completed) {
+                    AppState.userCalendar[evt.date] = (AppState.userCalendar[evt.date] || 0) + 1;
+                }
+            });
+            console.log(`📦 Loaded ${localEvents.length} calendar events from localStorage`);
+        }
+    }
+
     initializeCharacterVoiceEngine();
     initRouting();
     initCalendar();
