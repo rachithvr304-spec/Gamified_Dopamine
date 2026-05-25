@@ -1758,7 +1758,7 @@ function updateDistractionCounts() {
     const dailyCount = distractions.filter(d => {
         const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
         return entryDate === todayStr;
-    }).reduce((sum, d) => sum + (d.duration || 1), 0);  // Sum duration in minutes
+    }).reduce((sum, d) => sum + (d.duration || 0), 0);  // Sum duration in minutes (default to 0 if missing)
     
     // WEEKLY COUNT: Count entries from current week (Monday to today)
     const weeklyCount = distractions.filter(d => {
@@ -1804,8 +1804,7 @@ async function handleDistractionSubmit(e) {
         addLocalDistraction({
             activity: entry.type,
             timestamp: entry.timestamp,
-            duration: durationMinutes,
-            duration: entry.duration
+            duration: durationMinutes  // Save the parsed minutes value
         });
     }
     
