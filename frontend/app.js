@@ -386,12 +386,12 @@ function renderCalendarMonth() {
             cell.innerHTML = `<span class="cross">✗</span><span class="date">${day}</span>`;
         }
         
-        // HIGHLIGHT TODAY'S DATE IN DARK RED - APPLY AFTER OTHER CLASSES SO IT OVERRIDES
+        // HIGHLIGHT TODAY'S DATE IN DARK RED - USE setProperty WITH !important
         if (dateStr === todayStr) {
-            cell.style.backgroundColor = '#8B0000 !important';  // Dark red with !important to override .completed/.partial
-            cell.style.color = '#fff !important';
-            cell.style.fontWeight = 'bold';
-            cell.style.borderRadius = '4px';
+            cell.style.setProperty('background-color', '#8B0000', 'important');  // Dark red with !important
+            cell.style.setProperty('color', '#fff', 'important');
+            cell.style.setProperty('font-weight', 'bold', 'important');
+            cell.style.setProperty('border-radius', '4px', 'important');
             cell.classList.add('today');
         }
         

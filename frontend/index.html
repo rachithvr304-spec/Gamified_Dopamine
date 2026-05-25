@@ -172,7 +172,7 @@
                 <form id="distraction-form" class="distraction-form">
                     <div class="form-group">
                         <label for="select-distraction-type">Type of Distraction:</label>
-                        <select id="select-distraction-type" required>
+                        <select id="select-distraction-type" name="distraction-type" required>
                             <option value="">-- Select --</option>
                             <option value="social">Social Media</option>
                             <option value="browsing">Web Browsing</option>
@@ -183,15 +183,15 @@
                     </div>
                     <div class="form-group">
                         <label for="input-distraction-date">Date:</label>
-                        <input type="date" id="input-distraction-date" required>
+                        <input type="date" id="input-distraction-date" name="distraction-date" required>
                     </div>
                     <div class="form-group">
                         <label for="distraction-time">Time:</label>
-                        <input type="time" id="distraction-time" required>
+                        <input type="time" id="distraction-time" name="distraction-time" required>
                     </div>
                     <div class="form-group">
                         <label for="input-distraction-duration">Duration (minutes):</label>
-                        <input type="number" id="input-distraction-duration" min="1" required>
+                        <input type="number" id="input-distraction-duration" name="distraction-duration" min="1" required>
                     </div>
                     <button type="submit" id="btn-log-distraction" class="submit-btn">Log Distraction</button>
                 </form>
