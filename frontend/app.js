@@ -378,21 +378,21 @@ function renderCalendarMonth() {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const taskCount = AppState.userCalendar[dateStr] || 0;
         
-        // HIGHLIGHT TODAY'S DATE IN DARK RED
-        if (dateStr === todayStr) {
-            cell.style.backgroundColor = '#8B0000';  // Dark red
-            cell.style.color = '#fff';
-            cell.style.fontWeight = 'bold';
-            cell.style.borderRadius = '4px';
-            cell.classList.add('today');
-        }
-        
         if (taskCount >= 2) {
             cell.classList.add('completed');
             cell.innerHTML = `<span class="check">✓</span><span class="date">${day}</span>`;
         } else if (taskCount > 0) {
             cell.classList.add('partial');
             cell.innerHTML = `<span class="cross">✗</span><span class="date">${day}</span>`;
+        }
+        
+        // HIGHLIGHT TODAY'S DATE IN DARK RED - APPLY AFTER OTHER CLASSES SO IT OVERRIDES
+        if (dateStr === todayStr) {
+            cell.style.backgroundColor = '#8B0000 !important';  // Dark red with !important to override .completed/.partial
+            cell.style.color = '#fff !important';
+            cell.style.fontWeight = 'bold';
+            cell.style.borderRadius = '4px';
+            cell.classList.add('today');
         }
         
         DOM.calendarGrid.appendChild(cell);
@@ -1736,9 +1736,17 @@ function updateGoalProgress() {
 // ============================================================================
 
 function updateDistractionCounts() {
-    const today = new Date().toISOString().split('T')[0];
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    // DETERMINE WEEK START (Monday) and MONTH START (1st)
+    const dayOfWeek = today.getDay();  // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const weekStartDate = new Date(today);
+    weekStartDate.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));  // Get Monday of current week
+    const weekStart = weekStartDate.toISOString().split('T')[0];
+    
+    const monthStartDate = new Date(today.getFullYear(), today.getMonth(), 1);
+    const monthStart = monthStartDate.toISOString().split('T')[0];
     
     // Read from localStorage FIRST (live data)
     let distractions = [];
@@ -1749,23 +1757,28 @@ function updateDistractionCounts() {
     // Count distractions by date - handle both 'timestamp' and 'date' formats
     const dailyCount = distractions.filter(d => {
         const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
-        return entryDate === today;
+        return entryDate === todayStr;
     }).reduce((sum, d) => sum + (d.duration || 1), 0);  // Sum duration in minutes
     
+    // WEEKLY COUNT: Count entries from current week (Monday to today)
     const weeklyCount = distractions.filter(d => {
         const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
-        return entryDate >= weekAgo;
+        return entryDate >= weekStart && entryDate <= todayStr;
     }).length;  // Count frequency
     
+    // MONTHLY COUNT: Count entries from current month (1st to today)
     const monthlyCount = distractions.filter(d => {
         const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
-        return entryDate >= monthAgo;
+        return entryDate >= monthStart && entryDate <= todayStr;
     }).length;  // Count frequency
     
     // Update displays
     if (DOM.dailyDistractionCount) DOM.dailyDistractionCount.textContent = dailyCount + ' Min';
     if (DOM.weeklyDistractionCount) DOM.weeklyDistractionCount.textContent = weeklyCount;
     if (DOM.monthlyDistractionCount) DOM.monthlyDistractionCount.textContent = monthlyCount;
+    
+    // Render recent distraction logs
+    renderRecentDistractionLogs();
     
     // Update AppState for consistency
     AppState.userDistractions = distractions;
@@ -1805,8 +1818,60 @@ async function handleDistractionSubmit(e) {
     }
 }
 
+/**
+ * Render the last 2 recent distraction logs in the UI
+ * IMPORTANT: This only displays the last 2 entries, but all entries are kept in storage for accurate counting
+ */
+function renderRecentDistractionLogs() {
+    const historyContainer = document.getElementById('distraction-history-list');
+    if (!historyContainer) return;  // Exit if container doesn't exist
+    
+    // Get all distractions from localStorage
+    let distractions = [];
+    if (typeof getLocalDistractions === 'function') {
+        distractions = getLocalDistractions();
+    }
+    
+    // Clear existing logs
+    historyContainer.innerHTML = '';
+    
+    // Get only the last 2 entries (in reverse order, most recent first)
+    const recentLogs = distractions.slice(-2).reverse();
+    
+    if (recentLogs.length === 0) {
+        historyContainer.innerHTML = '<p style="color: #888; font-size: 14px; padding: 10px;">No distraction logs yet</p>';
+        return;
+    }
+    
+    // Create log entries
+    recentLogs.forEach(log => {
+        const logEntry = document.createElement('div');
+        logEntry.className = 'distraction-log-entry';
+        
+        // Parse timestamp
+        const logTime = new Date(log.timestamp || log.date);
+        const timeStr = logTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = logTime.toLocaleDateString();
+        
+        // Create HTML for log entry
+        logEntry.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; margin-bottom: 8px; font-size: 13px;">
+                <div style="flex: 1;">
+                    <div style="color: #00F5A0; font-weight: 600;">${log.activity || 'Unknown'}</div>
+                    <div style="color: #888; font-size: 12px;">${dateStr} at ${timeStr}</div>
+                </div>
+                <div style="color: #FF3366; font-weight: 600; text-align: right;">${log.duration || 0} min</div>
+            </div>
+        `;
+        
+        historyContainer.appendChild(logEntry);
+    });
+}
+
 function initDistractionTracker() {
     DOM.distractionForm?.addEventListener('submit', handleDistractionSubmit);
+    // Initial render of distraction logs
+    renderRecentDistractionLogs();
 }
 
 // ============================================================================
