@@ -298,7 +298,7 @@ const DOM = {
     endgoalValue: document.getElementById('text-longterm-xp'),
     performanceTbody: document.getElementById('performance-tbody'),
     distractionForm: document.getElementById('distraction-form'),
-    dailyDistractionCount: document.getElementById('daily-distraction-count'),
+    dailyDistractionCount: document.getElementById('today-distractions-count'),
     weeklyDistractionCount: document.getElementById('weekly-distraction-count'),
     monthlyDistractionCount: document.getElementById('monthly-distraction-count'),
     distractionEntries: document.getElementById('distraction-entries'),
