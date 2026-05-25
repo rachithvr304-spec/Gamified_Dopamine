@@ -134,9 +134,10 @@ let redeemablePoints = 0;
 // APPLICATION STATE
 // ============================================================================
 
+const TODAY = new Date();
 const AppState = {
-    currentYear: 2026,
-    currentMonth: 4,
+    currentYear: TODAY.getFullYear(),
+    currentMonth: TODAY.getMonth(),
     currentPanel: 'ch-core',
     currentExpression: 'exp 3',
     sidebarOpen: false,
@@ -442,6 +443,67 @@ function scheduleMidnightUpdate() {
     };
     
     updateAtMidnight();
+}
+
+// ============================================================================
+// DAILY RESET AT MIDNIGHT
+// ============================================================================
+function initDailyReset() {
+    const scheduleDailyReset = () => {
+        const now = new Date();
+        const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+        
+        console.log(`⏰ Daily reset scheduled for midnight (in ${Math.round(timeUntilMidnight / 1000 / 60)} min)`);
+        
+        setTimeout(() => {
+            console.log('🌅 Midnight reached - performing daily reset');
+            
+            // RESET: Daily XP and all tasks
+            BattleModeLiveEngine.state.currentDailyXp = 0;
+            BattleModeLiveEngine.state.spendableXp = 0;
+            BattleModeLiveEngine.state.todayKey = new Date().toISOString().split('T')[0];
+            BattleModeLiveEngine.state.tasks.forEach(task => {
+                task.completed = false;
+                task.timerActive = false;
+            });
+            
+            // RESET: Today's distraction count ONLY (keep weekly/monthly)
+            const today = new Date().toISOString().split('T')[0];
+            const allDistractions = getLocalDistractions ? getLocalDistractions() : [];
+            
+            // Remove today's distractions from localStorage
+            const tomorrowDistractions = allDistractions.filter(d => {
+                const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
+                return entryDate !== today;
+            });
+            
+            try {
+                localStorage.setItem('distractions', JSON.stringify(tomorrowDistractions));
+                console.log('✅ Today\'s distractions cleared (weekly/monthly preserved)');
+            } catch (err) {
+                console.error('Error clearing today\'s distractions:', err);
+            }
+            
+            // UPDATE DISPLAYS: Refresh all UI
+            AppState.currentYear = new Date().getFullYear();
+            AppState.currentMonth = new Date().getMonth();
+            renderCalendarMonth();
+            BattleModeLiveEngine.renderTaskMatrix();
+            BattleModeLiveEngine.updateCircularProgressRings();
+            updateDistractionCounts();
+            
+            // SAVE STATE
+            BattleModeLiveEngine.saveState();
+            
+            console.log('✅ Daily reset complete - midTermXp preserved:', BattleModeLiveEngine.state.midTermXp);
+            
+            // Schedule next reset
+            scheduleDailyReset();
+        }, timeUntilMidnight);
+    };
+    
+    scheduleDailyReset();
 }
 
 // ============================================================================
@@ -1713,11 +1775,12 @@ async function handleDistractionSubmit(e) {
     e.preventDefault();
     
     const formData = new FormData(DOM.distractionForm);
+    const durationMinutes = parseInt(formData.get('distraction-duration'), 10);
     const entry = {
         type: formData.get('distraction-type'),
-        date: formData.get('distraction-date'),
+        date: formData.get('distraction-date') || new Date().toISOString().split('T')[0],
         time: formData.get('distraction-time'),
-        duration: parseInt(formData.get('distraction-duration'), 10),
+        duration: durationMinutes,  // ENSURE this is saved in minutes
         timestamp: new Date().toISOString()
     };
     
@@ -1728,6 +1791,7 @@ async function handleDistractionSubmit(e) {
         addLocalDistraction({
             activity: entry.type,
             timestamp: entry.timestamp,
+            duration: durationMinutes,
             duration: entry.duration
         });
     }
@@ -1828,6 +1892,7 @@ function initializeApp() {
     initializeCharacterVoiceEngine();
     initRouting();
     initCalendar();
+    initDailyReset();  // START DAILY RESET SCHEDULER
     initChat();
     initDistractionTracker();
     initProfileForm();
@@ -1860,7 +1925,7 @@ const BattleModeLiveEngine = {
         currentDailyXp: 0,   // PERMANENT METRIC: Powers progress rings and calendar analytics
         spendableXp: 0,      // SPENDABLE WALLET: Disposable currency used strictly for shop purchases
         dailyMaxXp: 300,
-        midTermXp: 14200,
+        midTermXp: 0,        // PERSISTENT: Loaded from localStorage on init
         midTermGoalXp: 50000,
         longTermXp: 0,       // Campaign tracker scale target: 50 Lakh (5,000,000) XP
         
@@ -1883,6 +1948,9 @@ const BattleModeLiveEngine = {
     },
 
     init: async function() {
+        // RESTORE from localStorage: Load persisted battle mode state
+        this.restoreState();
+        
         if (!this.state.calendarHistory[this.state.todayKey]) {
             this.state.calendarHistory[this.state.todayKey] = 'INCOMPLETE';
         }
@@ -1896,6 +1964,53 @@ const BattleModeLiveEngine = {
         
         // Execute asynchronous Groq parameters mapping fetch layer
         await this.fetchAiTailoredDirectives();
+    },
+    
+    // PERSIST STATE TO LOCALSTORAGE
+    saveState: function() {
+        try {
+            localStorage.setItem('battleModeState', JSON.stringify(this.state));
+            console.log('💾 Battle mode state saved to localStorage');
+        } catch (err) {
+            console.error('❌ Error saving battle mode state:', err);
+        }
+    },
+    
+    // RESTORE STATE FROM LOCALSTORAGE
+    restoreState: function() {
+        try {
+            const saved = localStorage.getItem('battleModeState');
+            if (saved) {
+                const restored = JSON.parse(saved);
+                // Check if this is a NEW day
+                const savedTodayKey = restored.todayKey;
+                const currentTodayKey = new Date().toISOString().split('T')[0];
+                
+                if (savedTodayKey === currentTodayKey) {
+                    // SAME DAY: Restore all values including midTermXp
+                    this.state.currentDailyXp = restored.currentDailyXp || 0;
+                    this.state.spendableXp = restored.spendableXp || 0;
+                    this.state.midTermXp = restored.midTermXp || 0;
+                    this.state.longTermXp = restored.longTermXp || 0;
+                    this.state.tasks = restored.tasks || this.state.tasks;
+                    console.log('✅ Battle mode state restored from localStorage (same day)');
+                } else {
+                    // NEW DAY: Reset daily values but keep mid-term/long-term
+                    console.log('🌅 New day detected - resetting daily values');
+                    this.state.currentDailyXp = 0;
+                    this.state.spendableXp = 0;
+                    this.state.midTermXp = restored.midTermXp || 0;  // KEEP mid-term XP
+                    this.state.longTermXp = restored.longTermXp || 0; // KEEP long-term XP
+                    this.state.todayKey = currentTodayKey;
+                    // Reset all tasks to incomplete
+                    this.state.tasks.forEach(t => t.completed = false);
+                    // Save the reset state
+                    this.saveState();
+                }
+            }
+        } catch (err) {
+            console.error('❌ Error restoring battle mode state:', err);
+        }
     },
 
     // ASYNC GROQ BRIDGE PARSING PIPELINE
@@ -1948,6 +2063,7 @@ const BattleModeLiveEngine = {
 
         this.evaluateCalendarDayRule();
         this.updateCircularProgressRings();
+        this.saveState();  // SAVE AFTER EVERY CHANGE
         this.renderTaskMatrix();
         this.renderRewardShop(); // Keep shop claim button locking vectors up to date
     },
@@ -1966,7 +2082,11 @@ const BattleModeLiveEngine = {
 
     updateTaskName: function(taskId, updatedName) {
         const task = this.state.tasks.find(t => t.id === taskId);
-        if (task) task.name = updatedName;  // REMOVED !task.isAi check - ALL tasks editable
+        if (task) {
+            task.name = updatedName;  // REMOVED !task.isAi check - ALL tasks editable
+            this.renderTaskMatrix();
+            this.saveState();
+        }
     },
 
     updateTaskDuration: function(taskId, newDurationSeconds) {
@@ -1975,6 +2095,8 @@ const BattleModeLiveEngine = {
             const durationSecs = parseInt(newDurationSeconds, 10);
             if (durationSecs > 0) {
                 task.timeRemaining = durationSecs;
+                this.renderTaskMatrix();
+                this.saveState();
             }
         }
     },
@@ -1985,13 +2107,19 @@ const BattleModeLiveEngine = {
             const xpNum = parseInt(newXP, 10);
             if (xpNum > 0) {
                 task.xp = xpNum;
+                this.renderTaskMatrix();
+                this.saveState();
             }
         }
     },
 
     updateRewardName: function(rewardId, newName) {
         const reward = this.state.rewards.find(r => r.id === rewardId);
-        if (reward) reward.name = newName;  // REMOVED !reward.isAi check - ALL rewards editable
+        if (reward) {
+            reward.name = newName;  // REMOVED !reward.isAi check - ALL rewards editable
+            this.renderRewardShop();
+            this.saveState();
+        }
     },
 
     updateRewardCost: function(rewardId, newCost) {
@@ -2000,6 +2128,8 @@ const BattleModeLiveEngine = {
             const costNum = parseInt(newCost, 10);
             if (costNum > 0) {
                 reward.cost = costNum;
+                this.renderRewardShop();
+                this.saveState();
             }
         }
     },
@@ -2018,6 +2148,7 @@ const BattleModeLiveEngine = {
             // Re-render shop text values. Note: updateCircularProgressRings is NOT triggered 
             // because your analytics metrics and progress circles are completely safe.
             this.renderRewardShop();
+            this.saveState();  // SAVE after spending reward
         } else {
             alert(`[TRANSACTION DENIED] You need ${reward.cost - this.state.spendableXp} more XP.`);
         }
