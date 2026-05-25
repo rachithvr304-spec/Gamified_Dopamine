@@ -420,6 +420,28 @@ function initCalendar() {
     DOM.prevMonthBtn?.addEventListener('click', handlePrevMonth);
     DOM.nextMonthBtn?.addEventListener('click', handleNextMonth);
     renderCalendarMonth();
+    
+    // Start midnight updater to refresh calendar daily
+    scheduleMidnightUpdate();
+}
+
+// Schedule calendar refresh at midnight every day
+function scheduleMidnightUpdate() {
+    const updateAtMidnight = () => {
+        const now = new Date();
+        const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+        
+        console.log(`⏰ Calendar will refresh at midnight (in ${Math.round(timeUntilMidnight / 1000 / 60)} min)`);
+        
+        setTimeout(() => {
+            console.log('🌙 Midnight reached - refreshing calendar with today\'s date highlight');
+            renderCalendarMonth();
+            updateAtMidnight(); // Schedule next midnight update
+        }, timeUntilMidnight);
+    };
+    
+    updateAtMidnight();
 }
 
 // ============================================================================
@@ -1656,13 +1678,35 @@ function updateDistractionCounts() {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     
-    const dailyCount = AppState.userDistractions.filter(d => d.date === today).length;
-    const weeklyCount = AppState.userDistractions.filter(d => d.date >= weekAgo).length;
-    const monthlyCount = AppState.userDistractions.filter(d => d.date >= monthAgo).length;
+    // Read from localStorage FIRST (live data)
+    let distractions = [];
+    if (typeof getLocalDistractions === 'function') {
+        distractions = getLocalDistractions();
+    }
     
-    if (DOM.dailyDistractionCount) DOM.dailyDistractionCount.textContent = dailyCount;
+    // Count distractions by date - handle both 'timestamp' and 'date' formats
+    const dailyCount = distractions.filter(d => {
+        const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
+        return entryDate === today;
+    }).reduce((sum, d) => sum + (d.duration || 1), 0);  // Sum duration in minutes
+    
+    const weeklyCount = distractions.filter(d => {
+        const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
+        return entryDate >= weekAgo;
+    }).length;  // Count frequency
+    
+    const monthlyCount = distractions.filter(d => {
+        const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
+        return entryDate >= monthAgo;
+    }).length;  // Count frequency
+    
+    // Update displays
+    if (DOM.dailyDistractionCount) DOM.dailyDistractionCount.textContent = dailyCount + ' Min';
     if (DOM.weeklyDistractionCount) DOM.weeklyDistractionCount.textContent = weeklyCount;
     if (DOM.monthlyDistractionCount) DOM.monthlyDistractionCount.textContent = monthlyCount;
+    
+    // Update AppState for consistency
+    AppState.userDistractions = distractions;
 }
 
 async function handleDistractionSubmit(e) {
@@ -1708,6 +1752,12 @@ function initDistractionTracker() {
 async function handleProfileSubmit(e) {
     e.preventDefault();
     
+    const button = e.target.querySelector('button[type="submit"]');
+    const originalText = button?.textContent;
+    
+    // Show saving animation
+    if (button) button.textContent = '💾 SAVING...';
+    
     AppState.userContext = {
         academic: DOM.academicDetails?.value || '',
         routine: DOM.routineConstraints?.value || '',
@@ -1715,7 +1765,23 @@ async function handleProfileSubmit(e) {
         lifestyle: DOM.lifestyleRegimen?.value || ''
     };
     
-    console.log('Profile saved (local):', AppState.userContext);
+    // PERSIST LOCALLY: Save profile to localStorage
+    if (typeof localStorage !== 'undefined') {
+        try {
+            localStorage.setItem('user_context', JSON.stringify(AppState.userContext));
+            console.log('✅ Profile saved to localStorage:', AppState.userContext);
+        } catch (err) {
+            console.error('❌ Error saving profile:', err);
+        }
+    }
+    
+    // Simulate save animation for 1 second
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Reset button
+    if (button) button.textContent = '✅ SAVED!' ;
+    await new Promise(resolve => setTimeout(resolve, 800));
+    if (button) button.textContent = originalText;
     
     const newExpression = evaluateEmotionState();
     if (newExpression !== AppState.currentExpression) {
@@ -1900,29 +1966,37 @@ const BattleModeLiveEngine = {
 
     updateTaskName: function(taskId, updatedName) {
         const task = this.state.tasks.find(t => t.id === taskId);
-        if (task && !task.isAi) task.name = updatedName;
+        if (task) task.name = updatedName;  // REMOVED !task.isAi check - ALL tasks editable
     },
 
     updateTaskDuration: function(taskId, newDurationSeconds) {
         const task = this.state.tasks.find(t => t.id === taskId);
-        if (task && !task.isAi && !task.timerActive) {
+        if (task && !task.timerActive && !task.completed) {  // REMOVED !task.isAi check - ALL tasks editable
             const durationSecs = parseInt(newDurationSeconds, 10);
             if (durationSecs > 0) {
                 task.timeRemaining = durationSecs;
             }
         }
     },
+    
+    updateTaskXP: function(taskId, newXP) {
+        const task = this.state.tasks.find(t => t.id === taskId);
+        if (task) {  // ALL tasks can have XP edited
+            const xpNum = parseInt(newXP, 10);
+            if (xpNum > 0) {
+                task.xp = xpNum;
+            }
+        }
+    },
 
     updateRewardName: function(rewardId, newName) {
         const reward = this.state.rewards.find(r => r.id === rewardId);
-        if (reward && !reward.isAi) {
-            reward.name = newName;
-        }
+        if (reward) reward.name = newName;  // REMOVED !reward.isAi check - ALL rewards editable
     },
 
     updateRewardCost: function(rewardId, newCost) {
         const reward = this.state.rewards.find(r => r.id === rewardId);
-        if (reward && !reward.isAi) {
+        if (reward) {  // REMOVED !reward.isAi check - ALL rewards editable
             const costNum = parseInt(newCost, 10);
             if (costNum > 0) {
                 reward.cost = costNum;
@@ -2004,11 +2078,9 @@ const BattleModeLiveEngine = {
             card.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 10px; width: 70%;">
                     <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="BattleModeLiveEngine.toggleTaskCompletion('${task.id}', this.checked)">
-                    <span style="font-weight: bold;">[+${task.xp} XP]</span>
-                    ${task.isAi 
-                        ? `<span style="font-weight: bold; font-size: 11px;">${task.name} <span style="color:#c00;">[SHOULD DO]</span></span>` 
-                        : `<input type="text" value="${task.name}" style="border: none; border-bottom: 1px solid #ccc; font-size: 11px; width: 70%; font-family: monospace;" onchange="BattleModeLiveEngine.updateTaskName('${task.id}', this.value)">`
-                    }
+                    ${!task.completed ? `<input type="number" value="${task.xp}" style="width: 45px; border: 1px solid #ccc; padding: 2px 4px; font-family: monospace; font-size: 10px;" onchange="BattleModeLiveEngine.updateTaskXP('${task.id}', this.value)" min="1" title="Edit XP">` : `<span style="font-weight: bold;">[+${task.xp} XP]</span>`}
+                    <span style="font-weight: bold; font-size: 10px; color: #666;">${task.isAi ? '[AI]' : '[USER]'}</span>
+                    <input type="text" value="${task.name}" style="border: none; border-bottom: 1px solid #ccc; font-size: 11px; width: 70%; font-family: monospace;" onchange="BattleModeLiveEngine.updateTaskName('${task.id}', this.value)" ${task.completed ? 'disabled' : ''}>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px; width: 30%; justify-content: flex-end;">
                     <span id="timer-display-${task.id}" style="font-weight: bold; font-size: 14px; color: ${task.timerActive ? '#c00' : '#000'}; min-width: 50px;">${clockDisplay}</span>
@@ -2045,20 +2117,14 @@ const BattleModeLiveEngine = {
             card.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                     <span style="font-size: 10px; font-weight: bold; color: ${reward.isAi ? '#c00' : '#666'}">
-                        ${reward.isAi ? '[AI PREMIUM STRETCH]' : '[EDITABLE ASSET]'}
+                        ${reward.isAi ? '[AI PREMIUM]' : '[USER ASSET]'}
                     </span>
                     <span style="background: #000; color: #fff; padding: 2px 6px; font-size: 10px; font-weight: bold; display: flex; align-items: center; gap: 4px;">
-                        ${reward.isAi 
-                            ? `${reward.cost} XP`
-                            : `<input type="number" value="${reward.cost}" style="width: 40px; background: #000; color: #fff; border: none; font-family: monospace; font-weight: bold; text-align: right;" onchange="BattleModeLiveEngine.updateRewardCost('${reward.id}', this.value)" min="1"> XP`
-                        }
+                        <input type="number" value="${reward.cost}" style="width: 40px; background: #000; color: #fff; border: none; font-family: monospace; font-weight: bold; text-align: right;" onchange="BattleModeLiveEngine.updateRewardCost('${reward.id}', this.value)" min="1" title="Edit cost"> XP
                     </span>
                 </div>
                 <div style="margin: 4px 0;">
-                    ${reward.isAi 
-                        ? `<span style="font-size: 12px; font-weight: bold;">${reward.name}</span>`
-                        : `<input type="text" value="${reward.name}" style="width: 100%; border: none; border-bottom: 1px dashed #ccc; font-size: 12px; font-family: monospace; padding: 2px 0; background: transparent;" onchange="BattleModeLiveEngine.updateRewardName('${reward.id}', this.value)">`
-                    }
+                    <input type="text" value="${reward.name}" style="width: 100%; border: none; border-bottom: 1px dashed #ccc; font-size: 12px; font-family: monospace; padding: 2px 0; background: transparent;" onchange="BattleModeLiveEngine.updateRewardName('${reward.id}', this.value)" title="Edit reward name">
                 </div>
                 <button style="width: 100%; border: none; padding: 6px; background: ${canAfford ? '#000' : '#ccc'}; color: ${canAfford ? '#fff' : '#666'}; font-family: monospace; font-size: 11px; cursor: ${canAfford ? 'pointer' : 'not-allowed'}; font-weight: bold;"
                     onclick="BattleModeLiveEngine.redeemReward('${reward.id}')" ${canAfford ? '' : 'disabled'}>
