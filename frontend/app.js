@@ -92,6 +92,38 @@ const ASSET_PATHS = {
 };
 
 // ============================================================================
+// FIREBASE BLOCKER - ENFORCE LOCAL-ONLY MODE
+// ============================================================================
+// CRITICAL: Block all Firebase initialization and enforce localStorage-only operations
+// This prevents any Firebase API calls that would interfere with local data persistence
+
+(function blockFirebase() {
+    // Block Firebase SDK from initializing
+    if (typeof window !== 'undefined') {
+        window.firebase = null;
+        window.firebaseApp = null;
+        window.firebaseDB = null;
+        window.firebaseAuth = null;
+    }
+    
+    // Intercept any Firebase initialization attempts
+    console.warn('🔥 FIREBASE BLOCKER ACTIVE - All Firebase API calls are disabled. Using localStorage only.');
+    
+    // Override fetch to block Firebase requests
+    const originalFetch = window.fetch;
+    window.fetch = function(...args) {
+        const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+        if (url.includes('firebase') || url.includes('firestore') || url.includes('googleapis.com/identitytoolkit')) {
+            console.error('🚫 BLOCKED Firebase API request:', url);
+            return Promise.reject(new Error('Firebase API calls are disabled. Using localStorage only.'));
+        }
+        return originalFetch.apply(this, args);
+    };
+    
+    console.log('✅ Firebase blocker initialized - all requests will use localStorage');
+})();
+
+// ============================================================================
 // GLOBAL XP & REWARDS SYSTEM
 // ============================================================================
 
@@ -116,7 +148,7 @@ const AppState = {
     userId: 'user_' + Math.random().toString(36).substr(2, 9),
     currentDailyXp: 0,
     emotionTimeoutId: null,
-    emotionDurationMs: 5000,  // Emotions display for 5 seconds then reset
+    emotionDurationMs: 7000,  // Emotions display for 7 seconds then reset (increased from 5s)
     tasks: [
         { id: 'ai_1', name: "Master VTU Question Paper Scanners", xp: 75, isAi: true, completed: false, timeRemaining: 3600, timerActive: false },
         { id: 'ai_2', name: "Execute High-Intensity Calisthenics Routine", xp: 65, isAi: true, completed: false, timeRemaining: 1800, timerActive: false },
@@ -324,6 +356,10 @@ function renderCalendarMonth() {
     DOM.calendarTitle.textContent = `${MONTH_NAMES[month]} ${year}`;
     DOM.calendarGrid.innerHTML = '';
     
+    // Get today's date for highlighting
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     
@@ -340,6 +376,15 @@ function renderCalendarMonth() {
         
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const taskCount = AppState.userCalendar[dateStr] || 0;
+        
+        // HIGHLIGHT TODAY'S DATE IN DARK RED
+        if (dateStr === todayStr) {
+            cell.style.backgroundColor = '#8B0000';  // Dark red
+            cell.style.color = '#fff';
+            cell.style.fontWeight = 'bold';
+            cell.style.borderRadius = '4px';
+            cell.classList.add('today');
+        }
         
         if (taskCount >= 2) {
             cell.classList.add('completed');
@@ -469,7 +514,11 @@ function evaluateEmotionState() {
         d => d.date === new Date().toISOString().split('T')[0]
     ).length;
     
-    const dailyProgress = AppState.userGoals.daily || 0;
+    // Check progress from BattleModeLiveEngine first since it tracks active work
+    const dailyProgress = (typeof BattleModeLiveEngine !== 'undefined' && BattleModeLiveEngine.state) ? 
+        BattleModeLiveEngine.state.currentDailyXp : 
+        (AppState.currentDailyXp || AppState.userGoals.daily || 0);
+        
     const hasContext = Object.keys(AppState.userContext).length > 0;
     
     // exp 1 (Angry): dailyProgress === 0 AND taskCompletion < 30%
@@ -1854,10 +1903,30 @@ const BattleModeLiveEngine = {
         if (task && !task.isAi) task.name = updatedName;
     },
 
+    updateTaskDuration: function(taskId, newDurationSeconds) {
+        const task = this.state.tasks.find(t => t.id === taskId);
+        if (task && !task.isAi && !task.timerActive) {
+            const durationSecs = parseInt(newDurationSeconds, 10);
+            if (durationSecs > 0) {
+                task.timeRemaining = durationSecs;
+            }
+        }
+    },
+
     updateRewardName: function(rewardId, newName) {
         const reward = this.state.rewards.find(r => r.id === rewardId);
         if (reward && !reward.isAi) {
             reward.name = newName;
+        }
+    },
+
+    updateRewardCost: function(rewardId, newCost) {
+        const reward = this.state.rewards.find(r => r.id === rewardId);
+        if (reward && !reward.isAi) {
+            const costNum = parseInt(newCost, 10);
+            if (costNum > 0) {
+                reward.cost = costNum;
+            }
         }
     },
 
@@ -1894,9 +1963,11 @@ const BattleModeLiveEngine = {
     updateCircularProgressRings: function() {
         const C = 314.16; // Exact circumference parameter mapping
         
+        // Calculate percentages using CORRECT XP values
         const dailyPct = Math.min((this.state.currentDailyXp / this.state.dailyMaxXp) * 100, 100);
         const midtermPct = Math.min((this.state.midTermXp / this.state.midTermGoalXp) * 100, 100);
-        const longtermPct = Math.min((this.state.currentDailyXp / this.state.dailyMaxXp) * 100, 100); // Visual daily relative scale fix
+        // FIXED: longtermPct now uses longTermXp and longTermGoalXp (5 lakh = 500,000)
+        const longtermPct = Math.min((this.state.longTermXp / 500000) * 100, 100);
 
         const elDaily = document.getElementById("circle-daily-offset");
         const elMid = document.getElementById("circle-midterm-offset");
@@ -1913,7 +1984,7 @@ const BattleModeLiveEngine = {
 
         if (txtDaily) txtDaily.innerText = this.state.currentDailyXp;
         if (txtMid) txtMid.innerText = `${(this.state.midTermXp / 1000).toFixed(1)}k`;
-        if (txtLong) txtLong.innerText = this.state.longTermXp;
+        if (txtLong) txtLong.innerText = `${(this.state.longTermXp / 1000).toFixed(1)}k`;  // Display long-term XP in thousands
         if (headerText) headerText.innerText = `BATTLE MODE ACTIVE // CURRENT DAILY XP: ${this.state.currentDailyXp} / ${this.state.dailyMaxXp}`;
     },
 
@@ -1939,8 +2010,12 @@ const BattleModeLiveEngine = {
                         : `<input type="text" value="${task.name}" style="border: none; border-bottom: 1px solid #ccc; font-size: 11px; width: 70%; font-family: monospace;" onchange="BattleModeLiveEngine.updateTaskName('${task.id}', this.value)">`
                     }
                 </div>
-                <div style="display: flex; align-items: center; gap: 12px; width: 30%; justify-content: flex-end;">
-                    <span id="timer-display-${task.id}" style="font-weight: bold; font-size: 14px; color: ${task.timerActive ? '#c00' : '#000'}">${clockDisplay}</span>
+                <div style="display: flex; align-items: center; gap: 8px; width: 30%; justify-content: flex-end;">
+                    <span id="timer-display-${task.id}" style="font-weight: bold; font-size: 14px; color: ${task.timerActive ? '#c00' : '#000'}; min-width: 50px;">${clockDisplay}</span>
+                    ${!task.isAi && !task.timerActive && !task.completed
+                        ? `<input type="number" value="${task.timeRemaining}" style="border: 1px solid #ccc; padding: 2px 4px; font-size: 10px; width: 50px; font-family: monospace;" placeholder="secs" onchange="BattleModeLiveEngine.updateTaskDuration('${task.id}', this.value)" title="Edit duration in seconds">`
+                        : ''
+                    }
                     <button style="background: #000; color: #fff; border: none; padding: 4px 8px; font-size: 11px; cursor: pointer;" onclick="BattleModeLiveEngine.engageTaskTimer('${task.id}')">
                         ${task.timerActive ? 'PAUSE' : 'ENGAGE'}
                     </button>
@@ -1972,8 +2047,11 @@ const BattleModeLiveEngine = {
                     <span style="font-size: 10px; font-weight: bold; color: ${reward.isAi ? '#c00' : '#666'}">
                         ${reward.isAi ? '[AI PREMIUM STRETCH]' : '[EDITABLE ASSET]'}
                     </span>
-                    <span style="background: #000; color: #fff; padding: 2px 6px; font-size: 10px; font-weight: bold;">
-                        ${reward.cost} XP
+                    <span style="background: #000; color: #fff; padding: 2px 6px; font-size: 10px; font-weight: bold; display: flex; align-items: center; gap: 4px;">
+                        ${reward.isAi 
+                            ? `${reward.cost} XP`
+                            : `<input type="number" value="${reward.cost}" style="width: 40px; background: #000; color: #fff; border: none; font-family: monospace; font-weight: bold; text-align: right;" onchange="BattleModeLiveEngine.updateRewardCost('${reward.id}', this.value)" min="1"> XP`
+                        }
                     </span>
                 </div>
                 <div style="margin: 4px 0;">

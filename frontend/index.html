@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="./style.css">
     <!-- Local Storage Utility for Data Persistence -->
     <script src="./localStorage-utils.js"></script>
+    <!-- Config must load before app.js -->
 </head>
 <body>
     <!-- TOP HEADER BAR -->
@@ -45,6 +46,10 @@
             <button class="sidebar-nav-item" data-panel="rewards">
                 <span class="nav-icon">🏆</span>
                 <span class="nav-label">Reward Shop</span>
+            </button>
+            <button class="sidebar-nav-item" data-panel="help">
+                <span class="nav-icon">❓</span>
+                <span class="nav-label">Help & Support</span>
             </button>
         </nav>
     </aside>
@@ -297,13 +302,42 @@
             </div>
         </section>
 
+        <!-- PANEL 8: HELP & SUPPORT VIEW -->
+        <section id="panel-help" class="app-panel hidden">
+            <div class="help-wrapper">
+                <h2>Help & Support</h2>
+                <div class="help-content" style="padding: 20px; font-family: monospace; line-height: 1.8;">
+                    <h3>📞 Contact Information</h3>
+                    <p style="font-size: 16px; color: #c00; font-weight: bold;">Phone: 7348962064</p>
+                    
+                    <h3 style="margin-top: 20px;">❓ Frequently Asked Questions</h3>
+                    <div style="background: #f5f5f5; padding: 12px; border-left: 3px solid #000; margin-top: 10px;">
+                        <p><strong>Q: How do I track my distractions?</strong></p>
+                        <p>A: Go to "Distraction Tracker" in the sidebar and log each distraction. Your data is saved locally.</p>
+                    </div>
+                    
+                    <div style="background: #f5f5f5; padding: 12px; border-left: 3px solid #000; margin-top: 10px;">
+                        <p><strong>Q: How does the character respond?</strong></p>
+                        <p>A: The character changes expressions based on your emotional state and distractions. More distractions = annoyed expression.</p>
+                    </div>
+                    
+                    <div style="background: #f5f5f5; padding: 12px; border-left: 3px solid #000; margin-top: 10px;">
+                        <p><strong>Q: How do I earn XP?</strong></p>
+                        <p>A: Complete tasks in the Battle Plan to earn XP. XP can be spent on rewards in the Reward Shop.</p>
+                    </div>
+                    
+                    <div style="background: #f5f5f5; padding: 12px; border-left: 3px solid #000; margin-top: 10px;">
+                        <p><strong>Q: Is my data safe?</strong></p>
+                        <p>A: All your data is stored locally on your device. No data is sent to external servers.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
     </main>
 
     <!-- SCRIPTS -->
-    <!-- Firebase SDK (compat mode for CDN use) -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+    <!-- Firebase SDK scripts removed - using localStorage only -->
     
     <script src="config.js"></script>
     <script src="app.js"></script>
