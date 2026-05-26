@@ -134,9 +134,10 @@ let redeemablePoints = 0;
 // APPLICATION STATE
 // ============================================================================
 
+const TODAY = new Date();
 const AppState = {
-    currentYear: 2026,
-    currentMonth: 4,
+    currentYear: TODAY.getFullYear(),
+    currentMonth: TODAY.getMonth(),
     currentPanel: 'ch-core',
     currentExpression: 'exp 3',
     sidebarOpen: false,
@@ -297,7 +298,7 @@ const DOM = {
     endgoalValue: document.getElementById('text-longterm-xp'),
     performanceTbody: document.getElementById('performance-tbody'),
     distractionForm: document.getElementById('distraction-form'),
-    dailyDistractionCount: document.getElementById('daily-distraction-count'),
+    dailyDistractionCount: document.getElementById('today-distractions-count'),
     weeklyDistractionCount: document.getElementById('weekly-distraction-count'),
     monthlyDistractionCount: document.getElementById('monthly-distraction-count'),
     distractionEntries: document.getElementById('distraction-entries'),
@@ -377,21 +378,21 @@ function renderCalendarMonth() {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const taskCount = AppState.userCalendar[dateStr] || 0;
         
-        // HIGHLIGHT TODAY'S DATE IN DARK RED
-        if (dateStr === todayStr) {
-            cell.style.backgroundColor = '#8B0000';  // Dark red
-            cell.style.color = '#fff';
-            cell.style.fontWeight = 'bold';
-            cell.style.borderRadius = '4px';
-            cell.classList.add('today');
-        }
-        
         if (taskCount >= 2) {
             cell.classList.add('completed');
             cell.innerHTML = `<span class="check">✓</span><span class="date">${day}</span>`;
         } else if (taskCount > 0) {
             cell.classList.add('partial');
             cell.innerHTML = `<span class="cross">✗</span><span class="date">${day}</span>`;
+        }
+        
+        // HIGHLIGHT TODAY'S DATE IN DARK RED - USE setProperty WITH !important
+        if (dateStr === todayStr) {
+            cell.style.setProperty('background-color', '#8B0000', 'important');  // Dark red with !important
+            cell.style.setProperty('color', '#fff', 'important');
+            cell.style.setProperty('font-weight', 'bold', 'important');
+            cell.style.setProperty('border-radius', '4px', 'important');
+            cell.classList.add('today');
         }
         
         DOM.calendarGrid.appendChild(cell);
@@ -420,6 +421,89 @@ function initCalendar() {
     DOM.prevMonthBtn?.addEventListener('click', handlePrevMonth);
     DOM.nextMonthBtn?.addEventListener('click', handleNextMonth);
     renderCalendarMonth();
+    
+    // Start midnight updater to refresh calendar daily
+    scheduleMidnightUpdate();
+}
+
+// Schedule calendar refresh at midnight every day
+function scheduleMidnightUpdate() {
+    const updateAtMidnight = () => {
+        const now = new Date();
+        const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+        
+        console.log(`⏰ Calendar will refresh at midnight (in ${Math.round(timeUntilMidnight / 1000 / 60)} min)`);
+        
+        setTimeout(() => {
+            console.log('🌙 Midnight reached - refreshing calendar with today\'s date highlight');
+            renderCalendarMonth();
+            updateAtMidnight(); // Schedule next midnight update
+        }, timeUntilMidnight);
+    };
+    
+    updateAtMidnight();
+}
+
+// ============================================================================
+// DAILY RESET AT MIDNIGHT
+// ============================================================================
+function initDailyReset() {
+    const scheduleDailyReset = () => {
+        const now = new Date();
+        const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+        
+        console.log(`⏰ Daily reset scheduled for midnight (in ${Math.round(timeUntilMidnight / 1000 / 60)} min)`);
+        
+        setTimeout(() => {
+            console.log('🌅 Midnight reached - performing daily reset');
+            
+            // RESET: Daily XP and all tasks
+            BattleModeLiveEngine.state.currentDailyXp = 0;
+            BattleModeLiveEngine.state.spendableXp = 0;
+            BattleModeLiveEngine.state.todayKey = new Date().toISOString().split('T')[0];
+            BattleModeLiveEngine.state.tasks.forEach(task => {
+                task.completed = false;
+                task.timerActive = false;
+            });
+            
+            // RESET: Today's distraction count ONLY (keep weekly/monthly)
+            const today = new Date().toISOString().split('T')[0];
+            const allDistractions = getLocalDistractions ? getLocalDistractions() : [];
+            
+            // Remove today's distractions from localStorage
+            const tomorrowDistractions = allDistractions.filter(d => {
+                const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
+                return entryDate !== today;
+            });
+            
+            try {
+                localStorage.setItem('distractions', JSON.stringify(tomorrowDistractions));
+                console.log('✅ Today\'s distractions cleared (weekly/monthly preserved)');
+            } catch (err) {
+                console.error('Error clearing today\'s distractions:', err);
+            }
+            
+            // UPDATE DISPLAYS: Refresh all UI
+            AppState.currentYear = new Date().getFullYear();
+            AppState.currentMonth = new Date().getMonth();
+            renderCalendarMonth();
+            BattleModeLiveEngine.renderTaskMatrix();
+            BattleModeLiveEngine.updateCircularProgressRings();
+            updateDistractionCounts();
+            
+            // SAVE STATE
+            BattleModeLiveEngine.saveState();
+            
+            console.log('✅ Daily reset complete - midTermXp preserved:', BattleModeLiveEngine.state.midTermXp);
+            
+            // Schedule next reset
+            scheduleDailyReset();
+        }, timeUntilMidnight);
+    };
+    
+    scheduleDailyReset();
 }
 
 // ============================================================================
@@ -1652,28 +1736,64 @@ function updateGoalProgress() {
 // ============================================================================
 
 function updateDistractionCounts() {
-    const today = new Date().toISOString().split('T')[0];
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
     
-    const dailyCount = AppState.userDistractions.filter(d => d.date === today).length;
-    const weeklyCount = AppState.userDistractions.filter(d => d.date >= weekAgo).length;
-    const monthlyCount = AppState.userDistractions.filter(d => d.date >= monthAgo).length;
+    // DETERMINE WEEK START (Monday) and MONTH START (1st)
+    const dayOfWeek = today.getDay();  // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const weekStartDate = new Date(today);
+    weekStartDate.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));  // Get Monday of current week
+    const weekStart = weekStartDate.toISOString().split('T')[0];
     
-    if (DOM.dailyDistractionCount) DOM.dailyDistractionCount.textContent = dailyCount;
+    const monthStartDate = new Date(today.getFullYear(), today.getMonth(), 1);
+    const monthStart = monthStartDate.toISOString().split('T')[0];
+    
+    // Read from localStorage FIRST (live data)
+    let distractions = [];
+    if (typeof getLocalDistractions === 'function') {
+        distractions = getLocalDistractions();
+    }
+    
+    // Count distractions by date - handle both 'timestamp' and 'date' formats
+    const dailyCount = distractions.filter(d => {
+        const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
+        return entryDate === todayStr;
+    }).reduce((sum, d) => sum + (d.duration || 0), 0);  // Sum duration in minutes (default to 0 if missing)
+    
+    // WEEKLY COUNT: Count entries from current week (Monday to today)
+    const weeklyCount = distractions.filter(d => {
+        const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
+        return entryDate >= weekStart && entryDate <= todayStr;
+    }).length;  // Count frequency
+    
+    // MONTHLY COUNT: Count entries from current month (1st to today)
+    const monthlyCount = distractions.filter(d => {
+        const entryDate = d.date || (d.timestamp ? new Date(d.timestamp).toISOString().split('T')[0] : null);
+        return entryDate >= monthStart && entryDate <= todayStr;
+    }).length;  // Count frequency
+    
+    // Update displays
+    if (DOM.dailyDistractionCount) DOM.dailyDistractionCount.textContent = dailyCount + ' Min';
     if (DOM.weeklyDistractionCount) DOM.weeklyDistractionCount.textContent = weeklyCount;
     if (DOM.monthlyDistractionCount) DOM.monthlyDistractionCount.textContent = monthlyCount;
+    
+    // Render recent distraction logs
+    renderRecentDistractionLogs();
+    
+    // Update AppState for consistency
+    AppState.userDistractions = distractions;
 }
 
 async function handleDistractionSubmit(e) {
     e.preventDefault();
     
     const formData = new FormData(DOM.distractionForm);
+    const durationMinutes = parseInt(formData.get('distraction-duration'), 10);
     const entry = {
         type: formData.get('distraction-type'),
-        date: formData.get('distraction-date'),
+        date: formData.get('distraction-date') || new Date().toISOString().split('T')[0],
         time: formData.get('distraction-time'),
-        duration: parseInt(formData.get('distraction-duration'), 10),
+        duration: durationMinutes,  // ENSURE this is saved in minutes
         timestamp: new Date().toISOString()
     };
     
@@ -1684,7 +1804,7 @@ async function handleDistractionSubmit(e) {
         addLocalDistraction({
             activity: entry.type,
             timestamp: entry.timestamp,
-            duration: entry.duration
+            duration: durationMinutes  // Save the parsed minutes value
         });
     }
     
@@ -1697,8 +1817,60 @@ async function handleDistractionSubmit(e) {
     }
 }
 
+/**
+ * Render the last 2 recent distraction logs in the UI
+ * IMPORTANT: This only displays the last 2 entries, but all entries are kept in storage for accurate counting
+ */
+function renderRecentDistractionLogs() {
+    const historyContainer = document.getElementById('distraction-history-list');
+    if (!historyContainer) return;  // Exit if container doesn't exist
+    
+    // Get all distractions from localStorage
+    let distractions = [];
+    if (typeof getLocalDistractions === 'function') {
+        distractions = getLocalDistractions();
+    }
+    
+    // Clear existing logs
+    historyContainer.innerHTML = '';
+    
+    // Get only the last 2 entries (in reverse order, most recent first)
+    const recentLogs = distractions.slice(-2).reverse();
+    
+    if (recentLogs.length === 0) {
+        historyContainer.innerHTML = '<p style="color: #888; font-size: 14px; padding: 10px;">No distraction logs yet</p>';
+        return;
+    }
+    
+    // Create log entries
+    recentLogs.forEach(log => {
+        const logEntry = document.createElement('div');
+        logEntry.className = 'distraction-log-entry';
+        
+        // Parse timestamp
+        const logTime = new Date(log.timestamp || log.date);
+        const timeStr = logTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = logTime.toLocaleDateString();
+        
+        // Create HTML for log entry
+        logEntry.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; margin-bottom: 8px; font-size: 13px;">
+                <div style="flex: 1;">
+                    <div style="color: #00F5A0; font-weight: 600;">${log.activity || 'Unknown'}</div>
+                    <div style="color: #888; font-size: 12px;">${dateStr} at ${timeStr}</div>
+                </div>
+                <div style="color: #FF3366; font-weight: 600; text-align: right;">${log.duration || 0} min</div>
+            </div>
+        `;
+        
+        historyContainer.appendChild(logEntry);
+    });
+}
+
 function initDistractionTracker() {
     DOM.distractionForm?.addEventListener('submit', handleDistractionSubmit);
+    // Initial render of distraction logs
+    renderRecentDistractionLogs();
 }
 
 // ============================================================================
@@ -1708,6 +1880,12 @@ function initDistractionTracker() {
 async function handleProfileSubmit(e) {
     e.preventDefault();
     
+    const button = e.target.querySelector('button[type="submit"]');
+    const originalText = button?.textContent;
+    
+    // Show saving animation
+    if (button) button.textContent = '💾 SAVING...';
+    
     AppState.userContext = {
         academic: DOM.academicDetails?.value || '',
         routine: DOM.routineConstraints?.value || '',
@@ -1715,7 +1893,23 @@ async function handleProfileSubmit(e) {
         lifestyle: DOM.lifestyleRegimen?.value || ''
     };
     
-    console.log('Profile saved (local):', AppState.userContext);
+    // PERSIST LOCALLY: Save profile to localStorage
+    if (typeof localStorage !== 'undefined') {
+        try {
+            localStorage.setItem('user_context', JSON.stringify(AppState.userContext));
+            console.log('✅ Profile saved to localStorage:', AppState.userContext);
+        } catch (err) {
+            console.error('❌ Error saving profile:', err);
+        }
+    }
+    
+    // Simulate save animation for 1 second
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Reset button
+    if (button) button.textContent = '✅ SAVED!' ;
+    await new Promise(resolve => setTimeout(resolve, 800));
+    if (button) button.textContent = originalText;
     
     const newExpression = evaluateEmotionState();
     if (newExpression !== AppState.currentExpression) {
@@ -1762,6 +1956,7 @@ function initializeApp() {
     initializeCharacterVoiceEngine();
     initRouting();
     initCalendar();
+    initDailyReset();  // START DAILY RESET SCHEDULER
     initChat();
     initDistractionTracker();
     initProfileForm();
@@ -1794,7 +1989,7 @@ const BattleModeLiveEngine = {
         currentDailyXp: 0,   // PERMANENT METRIC: Powers progress rings and calendar analytics
         spendableXp: 0,      // SPENDABLE WALLET: Disposable currency used strictly for shop purchases
         dailyMaxXp: 300,
-        midTermXp: 14200,
+        midTermXp: 0,        // PERSISTENT: Loaded from localStorage on init
         midTermGoalXp: 50000,
         longTermXp: 0,       // Campaign tracker scale target: 50 Lakh (5,000,000) XP
         
@@ -1817,6 +2012,9 @@ const BattleModeLiveEngine = {
     },
 
     init: async function() {
+        // RESTORE from localStorage: Load persisted battle mode state
+        this.restoreState();
+        
         if (!this.state.calendarHistory[this.state.todayKey]) {
             this.state.calendarHistory[this.state.todayKey] = 'INCOMPLETE';
         }
@@ -1830,6 +2028,53 @@ const BattleModeLiveEngine = {
         
         // Execute asynchronous Groq parameters mapping fetch layer
         await this.fetchAiTailoredDirectives();
+    },
+    
+    // PERSIST STATE TO LOCALSTORAGE
+    saveState: function() {
+        try {
+            localStorage.setItem('battleModeState', JSON.stringify(this.state));
+            console.log('💾 Battle mode state saved to localStorage');
+        } catch (err) {
+            console.error('❌ Error saving battle mode state:', err);
+        }
+    },
+    
+    // RESTORE STATE FROM LOCALSTORAGE
+    restoreState: function() {
+        try {
+            const saved = localStorage.getItem('battleModeState');
+            if (saved) {
+                const restored = JSON.parse(saved);
+                // Check if this is a NEW day
+                const savedTodayKey = restored.todayKey;
+                const currentTodayKey = new Date().toISOString().split('T')[0];
+                
+                if (savedTodayKey === currentTodayKey) {
+                    // SAME DAY: Restore all values including midTermXp
+                    this.state.currentDailyXp = restored.currentDailyXp || 0;
+                    this.state.spendableXp = restored.spendableXp || 0;
+                    this.state.midTermXp = restored.midTermXp || 0;
+                    this.state.longTermXp = restored.longTermXp || 0;
+                    this.state.tasks = restored.tasks || this.state.tasks;
+                    console.log('✅ Battle mode state restored from localStorage (same day)');
+                } else {
+                    // NEW DAY: Reset daily values but keep mid-term/long-term
+                    console.log('🌅 New day detected - resetting daily values');
+                    this.state.currentDailyXp = 0;
+                    this.state.spendableXp = 0;
+                    this.state.midTermXp = restored.midTermXp || 0;  // KEEP mid-term XP
+                    this.state.longTermXp = restored.longTermXp || 0; // KEEP long-term XP
+                    this.state.todayKey = currentTodayKey;
+                    // Reset all tasks to incomplete
+                    this.state.tasks.forEach(t => t.completed = false);
+                    // Save the reset state
+                    this.saveState();
+                }
+            }
+        } catch (err) {
+            console.error('❌ Error restoring battle mode state:', err);
+        }
     },
 
     // ASYNC GROQ BRIDGE PARSING PIPELINE
@@ -1882,6 +2127,7 @@ const BattleModeLiveEngine = {
 
         this.evaluateCalendarDayRule();
         this.updateCircularProgressRings();
+        this.saveState();  // SAVE AFTER EVERY CHANGE
         this.renderTaskMatrix();
         this.renderRewardShop(); // Keep shop claim button locking vectors up to date
     },
@@ -1900,32 +2146,54 @@ const BattleModeLiveEngine = {
 
     updateTaskName: function(taskId, updatedName) {
         const task = this.state.tasks.find(t => t.id === taskId);
-        if (task && !task.isAi) task.name = updatedName;
+        if (task) {
+            task.name = updatedName;  // REMOVED !task.isAi check - ALL tasks editable
+            this.renderTaskMatrix();
+            this.saveState();
+        }
     },
 
     updateTaskDuration: function(taskId, newDurationSeconds) {
         const task = this.state.tasks.find(t => t.id === taskId);
-        if (task && !task.isAi && !task.timerActive) {
+        if (task && !task.timerActive && !task.completed) {  // REMOVED !task.isAi check - ALL tasks editable
             const durationSecs = parseInt(newDurationSeconds, 10);
             if (durationSecs > 0) {
                 task.timeRemaining = durationSecs;
+                this.renderTaskMatrix();
+                this.saveState();
+            }
+        }
+    },
+    
+    updateTaskXP: function(taskId, newXP) {
+        const task = this.state.tasks.find(t => t.id === taskId);
+        if (task) {  // ALL tasks can have XP edited
+            const xpNum = parseInt(newXP, 10);
+            if (xpNum > 0) {
+                task.xp = xpNum;
+                this.renderTaskMatrix();
+                this.saveState();
             }
         }
     },
 
     updateRewardName: function(rewardId, newName) {
         const reward = this.state.rewards.find(r => r.id === rewardId);
-        if (reward && !reward.isAi) {
-            reward.name = newName;
+        if (reward) {
+            reward.name = newName;  // REMOVED !reward.isAi check - ALL rewards editable
+            this.renderRewardShop();
+            this.saveState();
         }
     },
 
     updateRewardCost: function(rewardId, newCost) {
         const reward = this.state.rewards.find(r => r.id === rewardId);
-        if (reward && !reward.isAi) {
+        if (reward) {  // REMOVED !reward.isAi check - ALL rewards editable
             const costNum = parseInt(newCost, 10);
             if (costNum > 0) {
                 reward.cost = costNum;
+                this.renderRewardShop();
+                this.saveState();
             }
         }
     },
@@ -1944,6 +2212,7 @@ const BattleModeLiveEngine = {
             // Re-render shop text values. Note: updateCircularProgressRings is NOT triggered 
             // because your analytics metrics and progress circles are completely safe.
             this.renderRewardShop();
+            this.saveState();  // SAVE after spending reward
         } else {
             alert(`[TRANSACTION DENIED] You need ${reward.cost - this.state.spendableXp} more XP.`);
         }
@@ -2004,11 +2273,9 @@ const BattleModeLiveEngine = {
             card.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 10px; width: 70%;">
                     <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="BattleModeLiveEngine.toggleTaskCompletion('${task.id}', this.checked)">
-                    <span style="font-weight: bold;">[+${task.xp} XP]</span>
-                    ${task.isAi 
-                        ? `<span style="font-weight: bold; font-size: 11px;">${task.name} <span style="color:#c00;">[SHOULD DO]</span></span>` 
-                        : `<input type="text" value="${task.name}" style="border: none; border-bottom: 1px solid #ccc; font-size: 11px; width: 70%; font-family: monospace;" onchange="BattleModeLiveEngine.updateTaskName('${task.id}', this.value)">`
-                    }
+                    ${!task.completed ? `<input type="number" value="${task.xp}" style="width: 45px; border: 1px solid #ccc; padding: 2px 4px; font-family: monospace; font-size: 10px;" onchange="BattleModeLiveEngine.updateTaskXP('${task.id}', this.value)" min="1" title="Edit XP">` : `<span style="font-weight: bold;">[+${task.xp} XP]</span>`}
+                    <span style="font-weight: bold; font-size: 10px; color: #666;">${task.isAi ? '[AI]' : '[USER]'}</span>
+                    <input type="text" value="${task.name}" style="border: none; border-bottom: 1px solid #ccc; font-size: 11px; width: 70%; font-family: monospace;" onchange="BattleModeLiveEngine.updateTaskName('${task.id}', this.value)" ${task.completed ? 'disabled' : ''}>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px; width: 30%; justify-content: flex-end;">
                     <span id="timer-display-${task.id}" style="font-weight: bold; font-size: 14px; color: ${task.timerActive ? '#c00' : '#000'}; min-width: 50px;">${clockDisplay}</span>
@@ -2045,20 +2312,14 @@ const BattleModeLiveEngine = {
             card.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                     <span style="font-size: 10px; font-weight: bold; color: ${reward.isAi ? '#c00' : '#666'}">
-                        ${reward.isAi ? '[AI PREMIUM STRETCH]' : '[EDITABLE ASSET]'}
+                        ${reward.isAi ? '[AI PREMIUM]' : '[USER ASSET]'}
                     </span>
                     <span style="background: #000; color: #fff; padding: 2px 6px; font-size: 10px; font-weight: bold; display: flex; align-items: center; gap: 4px;">
-                        ${reward.isAi 
-                            ? `${reward.cost} XP`
-                            : `<input type="number" value="${reward.cost}" style="width: 40px; background: #000; color: #fff; border: none; font-family: monospace; font-weight: bold; text-align: right;" onchange="BattleModeLiveEngine.updateRewardCost('${reward.id}', this.value)" min="1"> XP`
-                        }
+                        <input type="number" value="${reward.cost}" style="width: 40px; background: #000; color: #fff; border: none; font-family: monospace; font-weight: bold; text-align: right;" onchange="BattleModeLiveEngine.updateRewardCost('${reward.id}', this.value)" min="1" title="Edit cost"> XP
                     </span>
                 </div>
                 <div style="margin: 4px 0;">
-                    ${reward.isAi 
-                        ? `<span style="font-size: 12px; font-weight: bold;">${reward.name}</span>`
-                        : `<input type="text" value="${reward.name}" style="width: 100%; border: none; border-bottom: 1px dashed #ccc; font-size: 12px; font-family: monospace; padding: 2px 0; background: transparent;" onchange="BattleModeLiveEngine.updateRewardName('${reward.id}', this.value)">`
-                    }
+                    <input type="text" value="${reward.name}" style="width: 100%; border: none; border-bottom: 1px dashed #ccc; font-size: 12px; font-family: monospace; padding: 2px 0; background: transparent;" onchange="BattleModeLiveEngine.updateRewardName('${reward.id}', this.value)" title="Edit reward name">
                 </div>
                 <button style="width: 100%; border: none; padding: 6px; background: ${canAfford ? '#000' : '#ccc'}; color: ${canAfford ? '#fff' : '#666'}; font-family: monospace; font-size: 11px; cursor: ${canAfford ? 'pointer' : 'not-allowed'}; font-weight: bold;"
                     onclick="BattleModeLiveEngine.redeemReward('${reward.id}')" ${canAfford ? '' : 'disabled'}>
